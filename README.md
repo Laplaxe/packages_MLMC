@@ -9,3 +9,4 @@ The directory contains the following files:
 - global_steps.py: global steps for the MADE and NADE architectures (e.g generation of the configurations)
 - made.py: files related to the MADE architecture.
 - nade.py: files related to the NADE architecture.
+- utilities.py: some utility function (e.g., computation of the best-spaced temperatures based on the specific heat).
