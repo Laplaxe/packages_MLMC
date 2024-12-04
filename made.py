@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 import random
+from torch.optim.lr_scheduler import ExponentialLR
 
 #set device to "cuda" if gpu is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,6 +35,7 @@ class AutoregressiveMasking(object):
             w = torch.tril(w, -1)  # Apply lower triangular masking
             module.weight.data = w
 
+# Build the autoregressive model
 # Build the autoregressive model
 class made(nn.Module):
     """Autoregressive MADE (Masked Autoencoder for Distribution Estimation)."""
@@ -69,7 +71,7 @@ class made(nn.Module):
     def forward_n(self, input, n):
         # Get the n-th row of the weight matrix of the linear layer
         nth_row = self.layer.weight[n]
-        x = torch.einsum("ij, j->i", input, nth_row)
+        x = torch.einsum("ij, j->i", input[:, :n], nth_row[:n])
         x = self.activation(2 * x)
         return x
 
@@ -115,74 +117,6 @@ def train_made(dataset, input_size, epochs=50, batch_size=256, learning_rate=1e-
             loss.backward()
             optimizer.step()
             model.apply(clipper)
-
-    return model
-
-# Train the model
-from torch.optim.lr_scheduler import ExponentialLR
-def train_made_improved_old(dataset, input_size, epochs=50, batch_size=256, patience = 10, learning_rate = 0.01, scheduler_time = 10):
-    """
-    Train the MADE architecture using data.
-
-    Parameters:
-    - data: Training data as a PyTorch tensor, aka #configurations x #spins tensor.
-    - input_size (int): Size of the input features.
-    - epochs (int): Number of training epochs.
-    - batch_size (int): Batch size for training.
-    - learning_rate (float): Learning rate for optimization.
-
-    Returns:
-    - model: Trained MADE model.
-    """
-    data = torch.clone(dataset)
-    model = made(input_size)
-    model = model.to(device)
-    model.train()
-    clipper = AutoregressiveMasking()
-    model.apply(clipper)
-
-    best_loss = 100000000
-
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.BCELoss(reduction="mean")
-    scheduler = ExponentialLR(optimizer, gamma=0.5)
-
-    for epoch in tqdm(range(epochs)):
-        tot_loss = 0
-        count = 0
-        for i in range(0, len(data), batch_size):
-            indices = random.sample(range(data.shape[0]), batch_size)
-            #batch_data = data[indices]
-            batch_data = data[indices].to(device)
-
-            # Forward pass
-            output = model(batch_data)
-
-            # Compute loss
-            loss = criterion(output, (batch_data + 1) / 2)
-            tot_loss += loss
-            count += 1
-
-            # Backward pass and optimization
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            model.apply(clipper)
-
-        if epoch % scheduler_time == 0 and epoch > 0:
-                scheduler.step()
-
-        if tot_loss/count < best_loss:
-            best_loss = tot_loss/count
-            epochs_since_best_val_acc = 0
-            best_weights = model.state_dict()
-            #RICORDATI DI SALVARE!!!!!!!!!
-        else:
-            epochs_since_best_val_acc += 1
-
-        if epochs_since_best_val_acc >= patience:
-            model.load_state_dict(best_weights)
-            break
 
     return model
 
@@ -242,12 +176,56 @@ def train_made_improved(dataset, input_size, epochs=50, batch_size=256, patience
             best_loss = tot_loss/count
             epochs_since_best_val_acc = 0
             best_weights = model.state_dict()
-            #RICORDATI DI SALVARE!!!!!!!!!
         else:
             epochs_since_best_val_acc += 1
 
         if epochs_since_best_val_acc >= patience:
-            model.load_state_dict(best_weights)
             break
+    model.load_state_dict(best_weights)
+    return model
 
+#In retrain, we do not put decay nor patience
+def retrain_made(model, dataset, epochs=50, batch_size=256, learning_rate = 0.001):
+    """
+    Train the MADE architecture using data.
+
+    Parameters:
+    - data: Training data as a PyTorch tensor, aka #configurations x #spins tensor.
+    - input_size (int): Size of the input features.
+    - epochs (int): Number of training epochs.
+    - batch_size (int): Batch size for training.
+    - learning_rate (float): Learning rate for optimization.
+
+    Returns:
+    - model: Trained MADE model.
+    """
+    data = torch.clone(dataset)
+    model.train()
+    clipper = AutoregressiveMasking()
+    model.apply(clipper)
+
+    best_loss = 100000000
+
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.BCELoss(reduction="sum")
+    scheduler = ExponentialLR(optimizer, gamma=0.5)
+
+    for epoch in range(epochs):
+        for i in range(0, len(data), batch_size):
+            indices = random.sample(range(data.shape[0]), batch_size)
+            #batch_data = data[indices]
+            batch_data = data[indices].to(device)
+
+            # Forward pass
+            output = model(batch_data)
+
+            # Compute loss
+            loss = criterion(output, (batch_data + 1) / 2)
+
+            # Backward pass and optimization
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            model.apply(clipper)
+    
     return model
