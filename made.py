@@ -204,11 +204,8 @@ def retrain_made(model, dataset, epochs=50, batch_size=256, learning_rate = 0.00
     clipper = AutoregressiveMasking()
     model.apply(clipper)
 
-    best_loss = 100000000
-
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.BCELoss(reduction="sum")
-    scheduler = ExponentialLR(optimizer, gamma=0.5)
 
     for epoch in range(epochs):
         for i in range(0, len(data), batch_size):
